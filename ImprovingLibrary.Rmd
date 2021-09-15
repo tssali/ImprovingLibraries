@@ -1,0 +1,310 @@
+---
+title: "Improving Libraries in the 21st Century"
+author: "Tracy Ssali"
+date: "15/06/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=80),tidy=TRUE)
+```
+
+```{r, echo=FALSE, include=FALSE, results=FALSE}
+# Load relevant libraries
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(formatR)
+library(tinytex)
+```
+
+```{r, echo=FALSE, results='hide'}
+##  Functions used:
+# Function to remove commas and cast data type to numeric
+castToNumeric <- function(df){
+  as.numeric(gsub(",","",df))
+}
+
+# Function to check for NA and Inf
+identifyNAandINF <- function(df){
+  if (any(is.na(df)) == F) {
+    print("No NA in the dataset")
+  }else{
+    print("NA found")
+  }
+  
+  if (any(is.infinite(df)) == F){
+     print("No INF in the dataset")
+  }else{
+   print("INF found")
+  }
+}
+
+```
+
+```{r, echo=FALSE, results='hide'}
+# 1. Import all the datasets in R and create a dataframe including data from the 4 selected years.
+
+# Import the Data using a loop. 
+# NOTE: first column of year 2018 was removed since it was empty
+  for (i in seq(2015,2018,1)) {
+    
+    # Get the name of the current .csv file being imported
+    current_year <- paste("data_", i, ".csv", sep="") 
+    
+    # Assign the data from the .csv file to a dataframe with a unique name 
+    assign(
+      paste("data_", i, sep=""),                 
+      read.csv(current_year)
+      )  
+    
+    # Print out the file name
+    print(paste("Importing:", current_year))                              
+  }
+
+# Find the common column names from all the data frames.
+  common_col_names <- Reduce(f = intersect,
+                             x = list(colnames(data_2018),
+                                      colnames(data_2017),
+                                      colnames(data_2016),
+                                      colnames(data_2015)))
+
+# Combine the common columns into one dataframe.
+  data_combined <- rbind(subset(data_2015, select=common_col_names),
+                         subset(data_2016, select= common_col_names),
+                         subset(data_2017, select= common_col_names),
+                         subset(data_2018, select= common_col_names))
+```
+
+```{r Revenues Per Cardholder Calculation, echo=FALSE, results='hide'}
+# 2. Create a new column that represents operating revenue per active card holder (total operating Revenue / number of active card holders).
+
+# Create 2 "clean columns" representing operating revenue and active card holders. Calculate operating revenue per card holder.
+data_combined <- data_combined %>% 
+  mutate(total_revenue = castToNumeric(B2.9..Total.Operating.Revenues)) %>% 
+  mutate(active_cardholders = castToNumeric(A1.14..No..of.Active.Library.Cardholders)) %>% 
+  mutate(operating_per_cardholder = total_revenue/active_cardholders)
+```
+# 1. Introduction
+Libraries are an important resourse to the community. For the continued success of these institutions, it is important to take note on how provincial and municipal funds are being spent. While doing some routine data cleaning, I noticed that there were a number of INF values. The insights that I will explore in this report will focus on these libraries. Specifically, how many of these libraries are there, the library service type and they year over year trends.
+
+# 2. Analysis 
+## Insight 1: The mystery of the INF values.
+### Approach
+As previously mentioned, while cleaning the data I noticed that there were a number of libraries that had INF data. There seemed to be a trend that many of the libraries ended in TWP (township) and LSB (local services board). To investigate this, I extracted the end of the library names and counted their occurrence.
+```{r, echo=FALSE, results='hide'}
+# check for na and inf in the new column
+identifyNAandINF(data_combined$total_revenue)
+identifyNAandINF(data_combined$active_cardholders)
+identifyNAandINF(data_combined$operating_per_cardholder)
+
+# Seems that there were a few INFs located in the operating revenue per card holder column and no NAs for any of the columns. Lets investigate what is causing this:
+infOR <- data_combined %>% 
+  select(Survey.Year.From,
+         Library.Full.Name,
+         total_revenue, 
+         active_cardholders, 
+         operating_per_cardholder) %>% 
+  filter(is.infinite(operating_per_cardholder))
+
+# Seems like there are a number of libraries ending in TWP (township) and LSB (local services board). What percentage of libraries belong to this category
+
+# TWP 
+paste(round(100*length(grep("Twp", infOR$Library.Full.Name))/length(infOR$Library.Full.Name),1), "% (",
+      length(grep("Twp", infOR$Library.Full.Name)),
+      " of ", length(infOR$Library.Full.Name), 
+      ") of libraries end in TWP", sep="")
+#LSB
+paste(round(100*length(grep("LSB", infOR$Library.Full.Name))/length(infOR$Library.Full.Name),1), "% (",
+      length(grep("LSB", infOR$Library.Full.Name)),
+      " of ", length(infOR$Library.Full.Name), 
+      ") of libraries end in LSB", sep="")
+```
+
+
+```{r, echo=FALSE}
+# Create a bar chart to visualize this
+infOR %>% 
+  mutate(library_name_end = str_sub(Library.Full.Name,-3,-1)) %>% 
+  mutate(lib_name_clean = ifelse(str_detect(library_name_end, "Twp|LSB"), library_name_end, "other")) %>% 
+  count(lib_name_clean, sort=T) %>% 
+  ggplot(aes(x=lib_name_clean, y=n, fill=lib_name_clean)) + 
+  geom_bar(stat="identity", color="black") + 
+  # theme_void() + 
+  labs(x = "Library Service Type",
+       y = "Number of Libraries",
+       title = "Number of Libraries based on Library Name ending", 
+       fill= "Library Name Ending") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust=1))
+```
+
+### Summary of Insight 1
+There are a number of small libraries that have 0 card holders, but still have an operating revenue. Based on the bar chart, it appears that the majority of these libraries come from smaller cities such as townships (68.2%) and local services board (17.2%). It would be important to decipher whether the absence of cardholders in these regions is related to a lack of reporting or whether there are truly no card holders. Furthermore, since it appears that these libraries still have revenue, it would be interesting to know what are their sources of revenue and how they are spent.
+
+***
+
+## Insight 2: What Type Library are these libraries?
+### Approach
+This analysis assessed what are the library service types and ending of the library name of the libraries with 0 card holders. This was done by counting the number of libraries based on their ending and grouping by the library service.
+
+```{r, echo=FALSE}
+# Determine the proportion of libraries with the same ending that have the same Service. The props column represents the proportion of libraries that have the respective ending
+lib_type <- data_combined %>% 
+  select(Survey.Year.From,
+         Library.Full.Name,
+         A1.4.Type.of.Library.Service..English.,
+         total_revenue, 
+         active_cardholders, 
+         operating_per_cardholder) %>% 
+  filter(is.infinite(operating_per_cardholder)) %>% 
+  mutate(library_name_end = str_sub(Library.Full.Name,-3,-1)) %>% 
+  mutate(lib_name_clean = ifelse(str_detect(library_name_end, "Twp|LSB"), library_name_end, "other")) %>% 
+  mutate(Library.Service=as.factor(A1.4.Type.of.Library.Service..English.)) %>% 
+  group_by(Library.Service) %>% 
+  count(Library.Ending=lib_name_clean, sort=T) %>% 
+  mutate(props= n/sum(n), props = scales::percent(props))
+
+lib_type %>% 
+  ggplot(aes(fill=Library.Ending,  y=n, x=Library.Service)) + 
+  geom_bar(stat="identity", color="black") + 
+  labs(fill = "Library Name Ending",
+       y = "Number of Libraries",
+       x = "Library Service Type",
+       title = "Library Service based on Library Name ending") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust=1))
+
+```
+
+### Summary of Insight 2
+As shown in the bar plot, the majority of contracting municipality libraries end with Twp (85%) and the remaining libraries end with some "other" combination of 3 characters (15%). Contracting LSB end with LSB (87%) and the remaining libraries end with some "other" combination of 3 characters (13%). Contracting First Nations Band Council Libraries do not end with LSB or Twp. It appears that there are a number of libraries are contracted out and as a result, these libraries have any card holders. The majoity of these libraries are Contracting Municipality libraries.
+
+***
+
+## Insight 3: What does this trend hold over years?
+### Approach 
+This analysis focused on the year over year trend for libraries with 0 card holders. Specifically, for each library service type, how many 0 card holder libraries are there and how many of the library service types sieze to exist. This was done by Categorizing the data into Existing or Not existing (DNE) based on whether there was data reported for that library during that year. Data was grouped based on the Library service and the number of libraries with 0 card holders was counted.
+```{r, echo=FALSE}
+# Libraries with INF for at least one year 
+infLIBS <- infOR$Library.Full.Name
+
+# All data with INF for at least one year
+infLIBS_df <- data_combined[which(data_combined$Library.Full.Name %in% infLIBS),]
+
+# Create a dataframe that summarizes the libraries with 0 active card holders for each year. Libraries with no information will be labeled as no library. Note: lib_name_clean was created twice so that I would be able to decipher between the different library types labeled as "no library".
+infOR_byYR <- infLIBS_df %>% 
+  select(Survey.Year.From,
+         Library.Full.Name,
+         A1.4.Type.of.Library.Service..English.,
+         total_revenue, 
+         active_cardholders, 
+         operating_per_cardholder) %>% 
+    mutate(lib_name_clean=A1.4.Type.of.Library.Service..English.) %>% 
+  group_by(Survey.Year.From) %>% 
+      mutate(lib_name_clean2=A1.4.Type.of.Library.Service..English.) %>% 
+  group_by(Survey.Year.From) %>% 
+  pivot_wider(names_from = Survey.Year.From, values_from = lib_name_clean, names_prefix = "yr_", values_fill = "No Data")
+
+# Count the number of card holders for each library_name_end (i.e. Twp,LSB, other...etc)
+count2015 <- infOR_byYR %>%
+    group_by(lib_name_clean2) %>% 
+ count(yr_2015, sort=T) %>%
+  rename(service=lib_name_clean2,id=yr_2015, count=n) %>% 
+  mutate(year=2015)
+
+count2016 <- infOR_byYR %>%
+  group_by(lib_name_clean2) %>% 
+ count(yr_2016, sort=T)%>%
+  rename(service=lib_name_clean2,id=yr_2016,count=n) %>% 
+  mutate(year=2016)
+
+count2017 <- infOR_byYR %>%
+    group_by(lib_name_clean2) %>% 
+ count(yr_2017, sort=T)%>%
+  rename(service=lib_name_clean2,id=yr_2017, count=n) %>% 
+  mutate(year=2017)
+
+count2018 <- infOR_byYR %>%
+    group_by(lib_name_clean2) %>% 
+ count(yr_2018, sort=T)%>%
+  rename(service=lib_name_clean2,id=yr_2018, count=n)  %>% 
+  mutate(year=2018)
+
+# Combine the above count data into one dataframe
+df_counts <-  rbind(count2015, count2016, count2017, count2018)
+
+# Create a table summarizing the Library Services for each year and whether or not they exist. 
+df_counts %>% 
+  pivot_wider(names_from = year, values_from = count) %>% 
+  mutate(id = ifelse(str_detect(id, "No Data"), paste("DNE"), "Exists")) %>% 
+  mutate(id=as.factor(id))  %>%    
+  kable(longtable = T, booktabs = T) %>%
+  kable_minimal(latex_options = c("striped", "repeat_header"))
+
+# Visualize as a bar plot
+  df_counts %>% 
+  mutate(id = ifelse(str_detect(id, "No Data"), paste("DNE"), "Exists")) %>% 
+  ggplot(aes(x=year, y=count, color=service, shape=as.factor(id))) + 
+  geom_point() + 
+    geom_line(aes(linetype=as.factor(id)))+
+  labs(x = "Library Type", fill = "Year", linetype="Library Status", shape="Library Status", color = "Library Service")
+
+
+```
+
+### Summary of Insight 3
+Based on the above graph, the number of libraries with 0 cardholders for each library service type (Contracting Municipality, Contracting LSB, Contracting First Nations Band Council) remained constant over the 4 year period selected. Compared to the local service board libraries, the township libraries had a larger portion of libraries that didn't report any information. This could be an indicator that the township libraries have a higher rate of closures or have a lower compliance to reporting statistics about their users and services. From 2015 - 2017, there were no Contracting First Nations Band Council. In 2018 a new contracting library was created.
+
+--- 
+
+## (Extra) Insight 4: Revenue per card holder by region 
+### Approach 
+In the cities with the top/bottom revenue in 2018, how is the Operating Revenue per card holder changing? Calculate the revenue and select the cities with the 5 highest and lowest revenue per card holder. Used a graph to assess the year over year trend.
+
+```{r, echo=FALSE}
+# Starting with our original dataframe and filtering out the columns that we do not need. Only include the finite amounts. What are the cities with the bottom 5 revenue and top 5 revenue
+rev_by_city <- data_combined %>% 
+  select(Survey.Year.From,
+         A1.10.City.Town,
+         Library.Full.Name,
+         total_revenue,
+         active_cardholders,
+         operating_per_cardholder) %>%
+  filter(is.finite(operating_per_cardholder)) %>% 
+  filter(Survey.Year.From == "2018") %>% 
+  arrange(desc(total_revenue)) 
+
+# Top/Bottom 5 Libraries
+  top5 <- head(rev_by_city$Library.Full.Name,5)
+  bottom5 <- tail(rev_by_city$Library.Full.Name,5)
+  lib_list <- c(top5, bottom5)
+  
+# In the libraries cities with the top/lowest revenue in 2018, how is the OR per card holder changing?
+# Create a dataframe that only includes the top and bottom 5 libraries. Label the top libraries as top5 and the bottom 5 as bottom5.
+rev_data <- data_combined %>% 
+  filter(Library.Full.Name %in% lib_list) %>% 
+  filter(is.finite(operating_per_cardholder)) %>% 
+  select(Survey.Year.From,
+         Library.Full.Name,
+         A1.10.City.Town,
+         operating_per_cardholder) %>% 
+  mutate(revenue_category = ifelse(Library.Full.Name %in% top5, "top5", "bottom5" ))
+
+# Table showing the list per year in the top5 and bottom 5 libs
+rev_data %>% 
+  pivot_wider(values_from = operating_per_cardholder, names_from = Survey.Year.From) %>% 
+  select(A1.10.City.Town, revenue_category, '2015', '2016','2017','2018') %>% 
+  mutate_if(is.numeric, round, digits=2) %>% 
+  arrange(desc(revenue_category)) %>% 
+  kable(longtable = T, booktabs = T) %>%
+  kable_minimal(latex_options = c("striped", "repeat_header"))
+
+# Create a graph to visualize the trend
+rev_data %>% 
+  ggplot(aes(x = Survey.Year.From, y=operating_per_cardholder, color=A1.10.City.Town, shape = revenue_category)) +
+  geom_line() +
+  geom_point() + 
+  labs(title= "Four year Operating Revenue per Card Holder", x= "Survey Year", y="Operating Revenue per Card holder", shape="Category", color="City")
+```
+
+### Summary of Insight 4
+There is a large gap in the operating revenue per card holder in the libraries with the highest and lowest total revenues. Most libraries with higher revenues showed a slight increase in the operating revenue per card holder over the 4 years shown, while the libraries with the lowest revenues showed a slight decrease in the operating revenue per card holder. It is unclear whether this trend is driven by changes to the number of cardholders, total revenue or both. In the case that decreases in the low-revenue libraries are driven by changes in the number of cardholders, it could indicate that smaller libraries are in need of greater financial support to continue supporting the growing number users. 
